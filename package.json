@@ -1,0 +1,20 @@
+{
+  "name": "jotting",
+  "version": "1.0.0",
+  "description": "My learning Jotting",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "DigitalPool",
+  "license": "ISC",
+  "dependencies": {
+    "fastify": "^5.6.1",
+    "fastify-cors": "^6.0.3",
+    "fastify-plugin": "^5.1.0",
+    "fastify-static": "^4.6.1",
+    "i": "^0.3.7",
+    "sqlite3": "^5.1.7",
+    "tailwind": "^4.0.0"
+  }
+}
