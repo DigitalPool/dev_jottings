@@ -1367,8 +1367,14 @@ But `fastify.decorate()` is **the official, safe way** because:
 * It can be scoped to specific plugins.
 * It works with encapsulation (so decorators in one plugin don’t leak into others unless intended).
 
-
 *************************************************************************************************************************
+
+after creating this database js, we want to import it into our server
+
+we also import ***path*** and ***fileURLToPath***
+
+
+
 *************************************************************************************************************************
 *************************************************************************************************************************
 *************************************************************************************************************************

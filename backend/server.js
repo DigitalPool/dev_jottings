@@ -1,5 +1,9 @@
 import dotenv from 'dotenv'
 import Fastify from 'fastify'
+import { setupDb } from './db'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
 
 // dotenv.config({ path: '/custom/path/to/.env' })
 dotenv.config()
