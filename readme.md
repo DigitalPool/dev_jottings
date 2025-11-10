@@ -952,8 +952,158 @@ And now your app will open in your browser — with hot reload, TypeScript suppo
 
 *************************************************************************************************************************
 
+In your package.json there are more details to add
+
+under scripts, you need to specify how command like ***npm run start*** will work
+
+You do that by adding a script
+
+```js
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+```
+
+also you should add the type: module, so you can use ES6 import syntax
+
+```js
+  "type": "module",
+```
+
+You can also add a script as a watcher to check when there are changed so you should install 
+npm insall --sav-dev nodemon
+
+the you add this script to package.json
+
+```js
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+```
+
+🧠 1. What nodemon actually does
+
+nodemon is a development tool that automatically restarts your Node.js app whenever you change a file (like server.js, a route, or controller).
+
+Without it, you have to manually stop and restart Node every time you edit code.
+
+So:
+
+Tool	Behavior
+node server.js	Runs the app once — no restarts on changes
+nodemon server.js	Watches files and restarts automatically on save
+
+That’s why it’s usually installed as a dev dependency:
+
+npm install --save-dev nodemon
+
+⚙️ 2. "type": "module" — how it affects you
+
+Since your package.json includes:
+
+"type": "module"
+
+
+you’re using ES Modules (i.e., import/export syntax), not CommonJS (require()).
+
+✅ Good news: nodemon supports ES Modules perfectly fine.
+You just need to make sure your script uses node normally, no extra flags required (Node 14+ handles it).
+
+🧩 3. How to configure scripts correctly
+
+Here’s the best practice setup for your package.json:
+
+```js
+{
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
+```
+
+Explanation:
+
+npm run start → used in production. Runs your app once (no restarts).
+
+npm run dev → used during development. Automatically restarts on file changes.
+
+🧠 4. Why you need nodemon (and when you don’t)
+Environment	Should you use nodemon?	Why
+Local development	✅ Yes	Automatically reloads app when you save files
+Production	❌ No	Production apps should be managed by process managers like PM2 or systemd
+CI/CD pipelines	❌ No	Scripts run once, don’t need watchers
+
+So in your workflow:
+
+You’ll typically run npm run dev while building or testing APIs locally.
+
+Then when deploying (server, VPS, etc.), you’ll use npm start — no nodemon.
+
+⚙️ 5. Optional: fine-tuning nodemon
+
+You can customize what files it watches or restarts by adding a nodemon.json file:
+
+```js
+{
+  "watch": ["server.js", "routes/", "controllers/"],
+  "ext": "js,json",
+  "ignore": ["node_modules"],
+  "exec": "node server.js"
+}
+```
+
+That’s helpful if you have a big project and only want to restart when backend files change.
+
+🧾 6. Without nodemon (manual alternative)
+
+You can still use plain node — you’ll just have to restart manually every time you edit:
+
+node server.js
+It’s fine for simple scripts, but gets annoying fast once you start editing routes or DB logic often.
+
+
+*************************************************************************************************************************
+
+If you want Nodemon to automatically load .env variables on restart (so you don’t rely on dotenv inside your code):
+
+Install dotenv-cli
+:
+
+npm install --save-dev dotenv-cli
+
+
+Then update nodemon.json:
+
+{
+  "watch": ["server.js", "routes/", "controllers/"],
+  "ext": "js,json",
+  "ignore": ["node_modules"],
+  "exec": "dotenv node server.js"
+}
+
+
+That way, it always loads .env variables when restarting.
+
+b) Add a startup delay (if DB takes time)
+
+```js
+"delay": "500ms"
+```
+
+Sometimes helps if you have heavy DB connections and frequent restarts.
+
+
+*************************************************************************************************************************
+
 
 In the backend, install the needed dependencies
+```js
 
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -966,14 +1116,20 @@ In the backend, install the needed dependencies
     "fastify-static": "^4.6.1",
     "sqlite3": "^5.1.7"
   }
+```
 
+-----------------------------------------------------------------------------------------------------------------------------
+
+Read more about other fastify modules in the ecosystem documentation here
+
+https://fastify.dev/docs/v1.14.x/Documentation/Ecosystem/
 
 
 -----------------------------------------------------------------------------------------------------------------------------
 Why do we need all these fastify modules? 
 Let's unravel them
 
-Nice, this is a fun deep-dive. Let’s start with **`fastify-cookie`** (modern equivalent: `@fastify/cookie`).
+Let’s start with **`fastify-cookie`** (modern equivalent: `@fastify/cookie`).
 
 
 ## 1. What `fastify-cookie` does

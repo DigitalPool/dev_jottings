@@ -2,8 +2,11 @@
   "name": "backend",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "nodemon": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -19,5 +22,9 @@
     "fastify-plugin": "^5.1.0",
     "fastify-static": "^4.6.1",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^11.0.0",
+    "nodemon": "^3.1.10"
   }
 }

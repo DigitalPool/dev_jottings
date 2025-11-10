@@ -43,8 +43,14 @@ fastify.register(fastifyMultipart, {
 })
 
 const COOKIE_SECRET = process.env.COOKIE_SECRET;
+const PORT = process.env.PORT
 
 fastify.register(fastifyCookie, {
+  secret: COOKIE_SECRET,
+  parseOptions: {},
+})
+
+fastify.register(fastifyStatic, {
   secret: COOKIE_SECRET,
   parseOptions: {},
 })
@@ -64,7 +70,11 @@ fastify.get('/', (request, reply) => {
 })
 
 // Run the server!
-fastify.listen({ PORT }, (err, address) => {
-  if (err) throw err
-  // Server is now listening on ${address}
-})
+try {
+  fastify.listen(PORT)
+  console.info(`Server is now listening on Port: ${PORT}`)
+} catch (error) {
+  fastify.log.error(error)
+  console.error("Error starting Server at Fastify Listen: ", error)
+  process.exit(1)
+}
