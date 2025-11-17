@@ -13,7 +13,7 @@ import fastifyPlugin from 'fastify-plugin'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-//desclare or assign .env to a variable
+//declare or assign .env to a variable
 const envPath = path.join(__dirname, "./.env")
 
 //Now
@@ -60,10 +60,6 @@ fastify.register(fastifyStatic, {
 setupDb(fastify);
 
 
-
-
-
-
 // Declare a route
 fastify.get('/', (request, reply) => {
   reply.send({ hello: 'world' })
@@ -71,7 +67,7 @@ fastify.get('/', (request, reply) => {
 
 // Run the server!
 try {
-  fastify.listen(PORT)
+  fastify.listen({port: PORT})
   console.info(`Server is now listening on Port: ${PORT}`)
 } catch (error) {
   fastify.log.error(error)

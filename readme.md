@@ -2505,15 +2505,770 @@ we also import ***path*** and ***fileURLToPath***
 then we also import all the fastify modules which we have installed
 
 
+*************************************************************************************************************************
+
+Now, we move to structuring our fastify system
+There is a standard way that allows you seperate your fastify communication into
+***controllers*** , ***schemas*** and ***routes***
+
+How does it look?
+
+A perfect example is if you have a fastify get route thats add friends like this
+
+```js
+
+fastify.post('/friends', async (req, reply) => {
+  const { friend } = req.body;
+
+  try {
+    await new Promise((resolve, reject) => {
+      db.run(
+        `
+        INSERT INTO friends_list (name, nickname, age) 
+        VALUES (?, ?, ?)
+        `,
+        [friend.name, friend.nickname, friend.age],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this);
+        }
+      );
+    });
+
+    return reply.send({ success: true });
+
+  } catch (error) {
+    console.error("Error adding friend:", error.message);
+    return reply.code(422).send({ error: "Unable to add friend" });
+  }
+});
+
+
+```
+
+For this  design, we can have it registered in a routes folder, that will have all the routes that are working for a certain or similar service, page or functionality
+
+we can say, profileRoutes.js
+we then can design the parent route this way:
+
+```js
+export default async function profileRoutes.js (fastify, options){
+
+}
+```
+
+before we put any routes, if there requests, or routes will be needing the database, we call fastify to give us the instance of the database we have declared and decorated earlier, so it will look like
+
+```js
+export default async function profileRoutes.js (fastify, options){
+  const db = fastify.sqliteDb
+  // or const db = fastify.database if you decorated yours as database
+
+}
+```
+
+Now, any routes put in this parent, has access to the database, and can right or read from it as they like.
+Next thing now, we put in our route
+
+
+```js
+export default async function profileRoutes.js (fastify, options){
+  const db = fastify.sqliteDb
+  // or const db = fastify.database if you decorated yours as database
+
+    fastify.post('/friends', async (req, reply) => {
+    const { friend } = req.body;
+
+    try {
+      await new Promise((resolve, reject) => {
+        db.run(
+          `
+          INSERT INTO friends_list (name, nickname, age) 
+          VALUES (?, ?, ?)
+          `,
+          [friend.name, friend.nickname, friend.age],
+          function (err) {
+            if (err) reject(err);
+            else resolve(this);
+          }
+        );
+      });
+
+      return reply.send({ success: true });
+
+    } catch (error) {
+      console.error("Error adding friend:", error.message);
+      return reply.code(422).send({ error: "Unable to add friend" });
+    }
+  });
+}
+```
+
+But the work is not done here,
+
+We should define request and response structures that we are expecting into schemas objects of their own, 
+and then pass them while designing the fastify route.
+
+so we could have a ***friendsSchemas.js*** file
+then we can have ***addFriendsSchema*** object which we will export
+
+Then, we extract the whole route body inside controllers that already desing them,
+
+then we use/register these schemas + controllers in a routes file of that functionality.
+so,
+
+```js
+export const addFriendsSchema = {
+  //every request requires some parameters to execute, 
+  // so we should ask for those parameters. So we start with params
+
+  params: {
+
+  }
+
+}
+```
+
+in this ***params***, this is where you can perform some validation 
+lets unravel it before proceeding
+
+*********************************************************************************
+
+- **Fastify’s `params` schema** is based on **JSON Schema**, so it supports MANY more keywords than just `type`, `properties`, and `required`.
+
+# ✅ **1. The required structure of `params`**
+
+`params` must always be an object schema:
+
+```js
+params: {
+  type: "object",
+  properties: {},
+  required: []
+}
+```
+
+These 3 fields form the base, but you can add much more.
+
+---
+
+# 🔥 **2. Everything you can put inside `params`**
+
+## **(A) type**
+
+```js
+type: "object"
+```
+
+Only `"object"` is allowed for `params`.
+
+---
+
+## **(B) properties**
+
+Defines each URL parameter.
+
+```js
+properties: {
+  friendType: { type: "string" },
+  count: { type: "integer" }
+}
+```
+
+---
+
+## **(C) required**
+
+Which parameters are required?
+
+```js
+required: ["friendType"]
+```
+
+---
+
+# 🧠 **(D) Additional JSON Schema keywords you can use**
+
+Since each param is a schema itself, you can use these:
+
+### **1. string validators**
+
+For string parameters:
+
+```js
+properties: {
+  name: {
+    type: "string",
+    minLength: 3,
+    maxLength: 20,
+    pattern: "^[a-zA-Z]+$",
+    enum: ["close", "best", "family"]
+  }
+}
+```
+
+**Useful for things like `/friends/type/best`**
+
+---
+
+### **2. number validators**
+
+If your params include numbers:
+
+```js
+properties: {
+  count: {
+    type: "integer",
+    minimum: 1,
+    maximum: 100
+  }
+}
+```
+
+---
+
+### **3. boolean parameters**
+
+Fastify supports boolean params if converted manually.
+
+```js
+properties: {
+  isActive: { type: "boolean" }
+}
+```
+
+---
+
+### **4. format**
+
+Helpful for IDs:
+
+```js
+properties: {
+  userId: { type: "string", format: "uuid" }
+}
+```
+
+---
+
+### **5. description (Swagger)**
+
+```js
+properties: {
+  id: {
+    type: "string",
+    description: "User ID"
+  }
+}
+```
+
+---
+
+### **6. default values**
+
+(Only works in query/body — not very common in params)
+
+---
+
+### **7. examples (Swagger)**
+
+```js
+properties: {
+  id: {
+    type: "string",
+    example: "12345"
+  }
+}
+```
+
+---
+
+### **8. nullable**
+
+```js
+nullable: true
+```
+
+---
+
+### **9. additionalProperties**
+
+You can control whether extra params are allowed (usually false):
+
+```js
+additionalProperties: false
+```
+
+---
+
+### **10. patternProperties**
+
+Rare, but possible:
+
+```js
+patternProperties: {
+  "^id_[0-9]+$": { type: "string" }
+}
+```
+
+---
+
+# 🧱 Complete Example for Your Schema
+
+Here is a very complete schema for your `addFriendsSchema`:
+
+```js
+export const addFriendsSchema = {
+  params: {
+    type: "object",
+    additionalProperties: false,   // ❗ Best practice
+    required: ["friendType", "count"],
+    properties: {
+      friendType: {
+        type: "string",
+        enum: ["close", "best", "family"],
+        description: "Type of friend to add"
+      },
+      count: {
+        type: "integer",
+        minimum: 1,
+        maximum: 20,
+        description: "Number of friends to add"
+      }
+    }
+  }
+};
+```
+
+Route:
+
+```js
+fastify.post('/friends/:friendType/:count', {
+  schema: addFriendsSchema
+}, async (req, reply) => {
+  return {
+    message: `Added ${req.params.count} ${req.params.friendType} friends`
+  };
+});
+```
 
 
 *************************************************************************************************************************
+
+Now, let's continue
+
+```js
+export const addFriendsSchema = {
+  //every request requires some parameters to execute, 
+  // so we should ask for those parameters. So we start with params
+  // now, we know what params defines in it, basically like
+  // type, properties, required and maybe additionalProperties
+
+  params: {
+      type: 'object',
+      properties: {
+        friendName: {type: 'string'},
+        friendID: {type: 'integer'},
+      },
+      required: ['friendName','friendId']
+  }
+
+}
+```
+
+This params is more or less what we are expecting in the request body. we can also prepare a similar response schema
+with what we are expecting the the response body after a request has been received, successful or not. so lets add it.
+
+Now, let's continue
+
+```js
+export const addFriendsSchema = {
+  params: {
+      type: 'object',
+      properties: {
+        friendName: {type: 'string'},
+        friendID: {type: 'integer'},
+      },
+      required: ['friendName','friendId']
+  },
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'Friend added'
+        }
+      }
+    }
+    401: (
+      type: 'object',
+      properties: {
+        error: {
+          type: 'string',
+          example: 'Unauthorized'
+        }
+      }
+    )
+  }
+
+}
+```
+
+With these schemas designed, we can now add them to out fastify route we are designing
+
 *************************************************************************************************************************
+
+```js
+export default async function profileRoutes.js (fastify, options){
+  const db = fastify.sqliteDb
+  // or const db = fastify.database if you decorated yours as database
+
+    fastify.get('/friends', {schema: addFriendsSchema}, async (req, res) => {
+  })
+}
+```
+
 *************************************************************************************************************************
+
+Now, lets us extract everything under that '/friends' routes into a controller we can import into the route.
+This controller doesent neet to be passed the db, because, remember, by the time we are registering it in the routes
+function, we will already define the db for all.
+
+so, we export something that has all the route bodies
+
+```js
+export const friendsController = {
+  async addFriends(request, response, db) {
+      const { friend } = req.body;
+      try {
+        await new Promise((resolve, reject) => {
+          db.run(
+            `
+            INSERT INTO friends_list (name, nickname, age) 
+            VALUES (?, ?, ?)
+            `,
+            [friend.name, friend.nickname, friend.age],
+            function (err) {
+              if (err) reject(err);
+              else resolve(this);
+            }
+          );
+        });
+
+        return reply.send({ success: true });
+
+      } catch (error) {
+        console.error("Error adding friend:", error.message);
+        return reply.code(422).send({ error: "Unable to add friend" });
+      }
+    };
+
+  //we then can add other rotes bodies here
+  // async deleteFriends(request, response, db)...
+  // async blockFriends(request, response, db)...
+
+  //then we access them by doing friendsController.addFriends, or friendsController.deleteFriends etc
+}
+
+```
+
 *************************************************************************************************************************
+
+
+This controller with the route we have now, is the raw SQLite logic. 
+But we should simplify (or abstract) this logic using runQuery, getQuery, and allQuery helpers in a utils/helpers.js file
+that contains functions that helps us execute queries on our data base
+
+This is the raw, low-level implementation logic.
+
+```js
+await new Promise((resolve, reject) => {
+  db.run(
+    "INSERT INTO friends_list (name, nickname, age) VALUES (?, ?, ?)",
+    [friend.name, friend.nickname, friend.age],
+    function (err) {
+      if (err) reject(err);
+      else resolve(this);
+    }
+  );
+});
+```
+
+It works fine but is:
+* repetitive
+* verbose
+* not DRY
+* harder to read
+* harder to reuse*
+This is why we create helpers.
+
+So instead of writing this inside every controller:
+```js
+await new Promise(...)
+```
+
+You write:
+
+```js
+await runQuery(db, "INSERT ...", params)
+```
+
+This is what your controller becomes after simplification:
+
+Before (raw version)
+```js
+await new Promise((resolve, reject) => {
+  db.run(sql, params, cb);
+});
+```
+
+After (using helper)
+
+```js
+await runQuery(db, `
+  INSERT INTO friends_list (name, nickname, age)
+  VALUES (?, ?, ?)
+`, [friend.name, friend.nickname, friend.age]);
+
+```
+* Readable. Clean. Reusable.
+MUCH cleaner.
+
 *************************************************************************************************************************
+
+
+Here are the helper functions
+
+```js
+// Database helper functions
+export function runQuery(db, query, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(query, params, function (err) {
+      if (err) reject(err)
+      else resolve(this)
+    })
+  })
+}
+
+export function getQuery(db, query, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(query, params, (err, row) => {
+      if (err) reject(err)
+      else resolve(row)
+    })
+  })
+}
+
+export function allQuery(db, query, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(query, params, (err, rows) => {
+      if (err) reject(err)
+      else resolve(rows)
+    })
+  })
+}
+```
+
+
+what do these querires return
+understanding what each helper **returns** is essential so you know exactly what you're working with inside your controllers.
+
+# ✅ 1. **`runQuery` returns the RESULT OBJECT from `db.run()`**
+
+
+### What does `this` contain?
+
+When SQLite runs an INSERT/UPDATE/DELETE:
+
+`this` contains:
+
+```js
+{
+  lastID: 5,     // ID of inserted row (INSERT only)
+  changes: 1     // Number of rows modified
+}
+```
+
+### Example:
+
+```js
+const result = await runQuery(db, "INSERT INTO users(name) VALUES(?)", ["Azeez"]);
+
+console.log(result);
+```
+
+**Output:**
+
+```js
+{
+  lastID: 12,
+  changes: 1
+}
+```
+
+### Meaning:
+
+* `lastID` → the inserted row’s id (auto-increment)
+* `changes` → number of rows affected
+
+  * 1 = success
+  * 0 = nothing changed
+
+---
+
+# ✅ 2. **`getQuery` returns ONE row**
+
+### What it returns:
+
+`db.get()` returns **the first row only** (or `undefined` if nothing is found).
+
+### Example:
+
+```js
+const user = await getQuery(db, "SELECT * FROM users WHERE id = ?", [5]);
+
+console.log(user);
+```
+
+**Output:**
+
+```js
+{
+  id: 5,
+  name: "Azeez",
+  age: 27
+}
+```
+
+If no match:
+
+```js
+undefined
+```
+
+---
+
+# ✅ 3. **`allQuery` returns an ARRAY of rows**
+
+### What it returns:
+
+`db.all()` returns an **array** (might be empty):
+
+### Example:
+
+```js
+const users = await allQuery(db, "SELECT * FROM users");
+
+console.log(users);
+```
+
+**Output:**
+
+```js
+[
+  { id: 1, name: "Azeez" },
+  { id: 2, name: "John" },
+  { id: 3, name: "Fatima" }
+]
+```
+
+If no rows exist:
+
+```js
+[]
+```
+
+---
+
+# 🎯 Summary Table
+
+| Helper       | SQLite method | Returns                   | Example                  |
+| ------------ | ------------- | ------------------------- | ------------------------ |
+| `runQuery()` | `db.run()`    | `{ lastID, changes }`     | For INSERT/UPDATE/DELETE |
+| `getQuery()` | `db.get()`    | one object OR `undefined` | For fetching 1 row       |
+| `allQuery()` | `db.all()`    | array of objects          | For fetching many rows   |
+
+---
+
+# 🧠 Quick examples to help you visualize
+
+### INSERT
+
+```js
+const res = await runQuery(db, "INSERT INTO friends(name) VALUES(?)", ["Bilal"]);
+console.log(res);
+// { lastID: 7, changes: 1 }
+```
+
+### UPDATE
+
+```js
+const res = await runQuery(db, "UPDATE friends SET age = ? WHERE id = ?", [29, 7]);
+console.log(res);
+// { lastID: undefined, changes: 1 }
+```
+
+### DELETE nothing
+
+```js
+const res = await runQuery(db, "DELETE FROM friends WHERE id = 999");
+console.log(res);
+// { lastID: undefined, changes: 0 }
+```
+
+### GET one friend
+
+```js
+const friend = await getQuery(db, "SELECT * FROM friends WHERE id = ?", [7]);
+console.log(friend);
+// { id: 7, name: "Bilal", age: 29 }
+```
+
+### GET all friends
+
+```js
+const list = await allQuery(db, "SELECT * FROM friends");
+console.log(list);
+// [ {...}, {...}, {...} ]
+```
+
+
 *************************************************************************************************************************
-*************************************************************************************************************************
+
+Se lets simplyfy out code
+
+
+```js
+export const friendsController = {
+  async addFriends(request, response, db) {
+      const { friend } = req.body;
+      try {
+        const result = await runQuery(db, `
+				INSERT INTO friends_list (name, nickname, age) 
+            VALUES (?, ?, ?)
+			`, [friend.name, friend.nickname, friend.age])
+        if (result.changes === 0) {
+          return response.status(404).send({ error: 'unable to add friend' })
+        } else {
+          return response.send({ success: true });
+        }
+      } catch (error) {
+        console.error("Error adding friend:", error.message);
+        return response.code(422).send({ error: "Unable to add friend" });
+      }
+    }
+
+  //we then can add other rotes bodies here
+  // async deleteFriends(request, response, db)...
+  // async blockFriends(request, response, db)...
+
+  //then we access them by doing friendsController.addFriends, or friendsController.deleteFriends etc
+}
+
+```
+
+
 *************************************************************************************************************************
 *************************************************************************************************************************
 *************************************************************************************************************************
