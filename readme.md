@@ -2517,7 +2517,7 @@ A perfect example is if you have a fastify get route thats add friends like this
 
 ```js
 
-fastify.post('/friends', async (req, reply) => {
+fastify.post('/addfriends', async (req, reply) => {
   const { friend } = req.body;
 
   try {
@@ -2548,11 +2548,11 @@ fastify.post('/friends', async (req, reply) => {
 
 For this  design, we can have it registered in a routes folder, that will have all the routes that are working for a certain or similar service, page or functionality
 
-we can say, profileRoutes.js
+we can say, friendsRoutes.js
 we then can design the parent route this way:
 
 ```js
-export default async function profileRoutes.js (fastify, options){
+export default async function friendsRoutes (fastify, options){
 
 }
 ```
@@ -2560,7 +2560,7 @@ export default async function profileRoutes.js (fastify, options){
 before we put any routes, if there requests, or routes will be needing the database, we call fastify to give us the instance of the database we have declared and decorated earlier, so it will look like
 
 ```js
-export default async function profileRoutes.js (fastify, options){
+export default async function friendsRoutes (fastify, options){
   const db = fastify.sqliteDb
   // or const db = fastify.database if you decorated yours as database
 
@@ -2572,7 +2572,7 @@ Next thing now, we put in our route
 
 
 ```js
-export default async function profileRoutes.js (fastify, options){
+export default async function friendsRoutes (fastify, options){
   const db = fastify.sqliteDb
   // or const db = fastify.database if you decorated yours as database
 
@@ -2915,16 +2915,20 @@ export const addFriendsSchema = {
 }
 ```
 
-With these schemas designed, we can now add them to out fastify route we are designing
+With these schemas designed, we can now add them to our fastify route we are designing
 
 *************************************************************************************************************************
 
 ```js
-export default async function profileRoutes.js (fastify, options){
+
+import {addFriendsSchema} from 'addFriendsSchema.js'
+
+export default async function friendsRoutes (fastify, options){
   const db = fastify.sqliteDb
   // or const db = fastify.database if you decorated yours as database
 
-    fastify.get('/friends', {schema: addFriendsSchema}, async (req, res) => {
+     fastify.post('/addfriends', {schema: addFriendsSchema}, async (req, res) => {
+
   })
 }
 ```
@@ -3236,10 +3240,12 @@ console.log(list);
 
 *************************************************************************************************************************
 
-Se lets simplyfy out code
-
+Se lets simplyfy ouR code
 
 ```js
+import {getQuery, runQuery, allQuery} from './backend/utils/helpers.js' //or anywhere your utils is located
+
+
 export const friendsController = {
   async addFriends(request, response, db) {
       const { friend } = req.body;
@@ -3259,15 +3265,40 @@ export const friendsController = {
       }
     }
 
-  //we then can add other rotes bodies here
-  // async deleteFriends(request, response, db)...
-  // async blockFriends(request, response, db)...
+  async deleteFriends(request, response, db)...
+  async blockFriends(request, response, db)...
+
+  // we then can add other rotes bodies here
+  // async viewFriends(request, response, db)...
+  // async sendFriendRequest(request, response, db)...
 
   //then we access them by doing friendsController.addFriends, or friendsController.deleteFriends etc
 }
 
 ```
 
+
+Now we have our databse query helpers inside out controller.
+we can then import these controllers into our routes that has accepted the schema object earlier
+
+```js
+
+import friendsController from 'friendsController.js'
+
+
+export default async function friendseRoutes (fastify, options){
+  const db = fastify.sqliteDb
+  // or const db = fastify.database if you decorated yours as database
+
+    fastify.post('/addfriends', {schema: addFriendsSchema}, async (req, res) => {
+      friendsController.addFriends(req, res, db);
+  })
+}
+```
+
+As clean as it can get. Allahuma baarik.
+
+***And this is how you link all your routes to requests abd replies from the client or frontend***
 
 *************************************************************************************************************************
 *************************************************************************************************************************
