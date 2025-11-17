@@ -3301,6 +3301,402 @@ As clean as it can get. Allahuma baarik.
 ***And this is how you link all your routes to requests abd replies from the client or frontend***
 
 *************************************************************************************************************************
+
+Now is a perfect time to setup the ***authentication*** and the ***middleware*** logic
+
+For ***authentication***, it happens that the client either tries to access a page/feature and is asked to login first.
+A form is displayed to client, and they put in their details. On submit a authentication route is called.
+
+How does this route look like
+
+we have three files like we have explained for all routes earlier
+
+* *** schemas/authSchema.js *** - define and authenticate the request & response syntax for the authentication
+* *** controllers/authController.js *** - the controllers sit here
+* *** routes/auth.js *** - the auth routes live here
+
+
+let's take a look how the typical authSchema will look like.
+
+```js
+export const logInSchema = {
+  body: {
+    type: 'object',
+    properties: {
+      username: {
+        type: 'string',
+        minLenght: '1',
+        maxLenght: '30',
+        pattern: '^[a-zA-Z0-9_]+$'
+      }
+      password: {
+        type: 'string',
+        minLength: 6,
+        pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-={}\\[\\]|;:\'",.<>/?]).+$'
+      }
+    },
+    additionalProperties: false,
+    required: ['username', 'password']
+  }
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        userId: { type: 'number' },
+        username: { type: 'string' },
+        avatar: { type: 'string' },
+        preferred_language: { type: 'string' }
+      }
+    }
+    400: {
+    type: 'object',
+    properties: {
+      error: { type: 'string' }
+      }
+    },
+    401: {
+      type: 'object',
+      properties: {
+        error: { type: 'string' }
+      }
+    },
+    404: {
+      type: 'object',
+      properties: {
+        error: { type: 'string' }
+      }
+    },
+    409: {
+      type: 'object',
+      properties: {
+        error: { type: 'string' }
+      }
+    },
+    422: {
+      type: 'object',
+      properties: {
+        error: { type: 'string' }
+      }
+    },
+    503: {
+      type: 'object',
+      properties: {
+        error: { type: 'string' }
+      }
+    }
+  }
+}
+
+export const logoutSchema = {
+  tags: ['Auth'],
+  summary: 'Logout user and clear session',
+  description: 'Removes the session from database and clears the sessionId cookie',
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true }
+      },
+      required: ['success']
+    }
+  }
+};
+
+
+export const registerSchema = {
+  tags: ['Auth'],
+  summary: 'Register a new user (multipart, avatar optional)',
+  consumes: ['multipart/form-data'],
+  body: {
+    type: 'object',
+    properties: {
+      username: {
+        type: 'string',
+        minLength: 3,
+        maxLength: 30,
+        pattern: '^[a-zA-Z0-9_]+$'
+      },
+      email: {
+        type: 'string',
+        format: 'email'
+      },
+      password: {
+        type: 'string',
+        minLength: 6
+      },
+      avatar: {
+        type: 'string',
+        format: 'binary',
+        description: 'Avatar image file (optional)'
+      }
+    },
+    required: ['username', 'email', 'password'],
+    additionalProperties: false
+  },
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        userId: { type: 'integer' },
+        username: { type: 'string' },
+        avatar: { type: 'string' },
+      },
+    },
+    400: {
+      type: 'object',
+      properties: { error: { type: 'string' } },
+    },
+    409: {
+      type: 'object',
+      properties: { error: { type: 'string' } },
+    },
+    422: {
+      type: 'object',
+      properties: { error: { type: 'string' } },
+    },
+  },
+}
+
+```
+
+
+***********************************************************************************************************
+
+
+Fastify’s schema system has **specific keys** you can use, depending on what part of the request/response you want to validate or document.
+
+Here is the **complete list** of useful schema keys you can use in Fastify:
+
+---
+
+# ✅ **1. body**
+
+Validates the **POST**, **PUT**, **PATCH** request body.
+
+```js
+body: { type: 'object', properties: {} }
+```
+
+---
+
+# ✅ **2. params**
+
+Validates **URL params** like `/users/:id`.
+
+```js
+params: { type: 'object', properties: { id: { type: 'integer' } } }
+```
+
+---
+
+# ✅ **3. querystring** (also called `query`)
+
+Validates URL query parameters like:
+
+`/users?limit=10&sort=name`
+
+```js
+querystring: { type: 'object', properties: {} }
+```
+
+---
+
+# ✅ **4. headers**
+
+Validates **request headers**.
+
+Useful for auth tokens, API keys, etc.
+
+```js
+headers: {
+  type: 'object',
+  properties: {
+    authorization: { type: 'string' }
+  },
+  required: ['authorization']
+}
+```
+
+---
+
+# ✅ **5. response**
+
+Validates **what your API returns**.
+
+This is very powerful for ensuring consistent API responses.
+
+```js
+response: {
+  200: {
+    type: 'object',
+    properties: {
+      token: { type: 'string' }
+    }
+  }
+}
+```
+
+---
+
+# 🟦 **6. tags** (Swagger only)
+
+Used for grouping endpoints in Swagger UI.
+
+```js
+tags: ['Auth']
+```
+
+---
+
+# 🟦 **7. summary** (Swagger only)
+
+Short description in the Swagger UI docs.
+
+```js
+summary: "Login a user"
+```
+
+---
+
+# 🟦 **8. description** (Swagger only)
+
+Longer explanation than summary.
+
+```js
+description: "This endpoint logs in a user with username and password."
+```
+
+---
+
+# 🟦 **9. consumes** (Swagger only)
+
+Specifies content types the API accepts.
+
+Useful for file upload:
+
+```js
+consumes: ['multipart/form-data']
+```
+
+---
+
+# 🟧 **10. produces** (Swagger only)
+
+Tells Swagger what the endpoint returns.
+
+```js
+produces: ['application/json']
+```
+
+---
+
+# 🟩 **11. security**
+
+Swagger security definitions (JWT, API key, etc.)
+
+```js
+security: [{
+  bearerAuth: []
+}]
+```
+
+---
+
+# 🟦 **12. deprecated**
+
+Marks an endpoint as deprecated (Swagger only).
+
+```js
+deprecated: true
+```
+
+---
+
+# 🔥 **13. multipart (Fastify plugin option)**
+
+Used when handling file uploads.
+
+When using fastify-multipart:
+
+```js
+multipart: true
+```
+
+---
+
+# 🟩 **14. cookies**
+
+If using the fastify-cookie plugin, you can validate cookies.
+
+```js
+cookie: {
+  type: 'object',
+  properties: {
+    sessionId: { type: 'string' }
+  }
+}
+```
+
+---
+
+# ⭐ **Complete Fastify Schema Keys Table**
+
+| Schema Key    | Purpose                              |
+| ------------- | ------------------------------------ |
+| `body`        | Validate POST/PUT/PATCH body         |
+| `params`      | Validate URL params (`/:id`)         |
+| `querystring` | Validate query string (`?sort=name`) |
+| `headers`     | Validate headers                     |
+| `response`    | Validate what you send back          |
+| `tags`        | Swagger grouping                     |
+| `summary`     | Swagger short description            |
+| `description` | Swagger long description             |
+| `consumes`    | Swagger incoming media types         |
+| `produces`    | Swagger outgoing media types         |
+| `security`    | Swagger security (JWT, etc.)         |
+| `deprecated`  | Swagger mark deprecated endpoint     |
+| `cookie`      | Validate cookies                     |
+| `multipart`   | Indicate route accepts file uploads  |
+
+
+
+*************************************************************************************************************************
+
+After we have dewigned the login schemas in the schemas files, then we import them into our authControllers.js and use them
+
+```js
+import { loginSchema, logoutSchema, registerSchema } from 'schemas/authSchema.js'
+```
+
+***********************************************************************************************************
+
+after the authentication, we design a middleware that sits between the frontend and the backend, 
+and ensure loggedIn user is actually authenticated to see the pages which they are trying to access.
+The loggedIn user's Id is gotten from the database, which is the id registered there for him upon registration
+confirmed from ther upon signup.
+
+So we create a file called *** middleware/authPlugin.js *** and in it a file called 
+
+so what should be in this folder?
+
+In this folder is a fastify function, that received the user 
+
+
+
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
+*************************************************************************************************************************
 *************************************************************************************************************************
 *************************************************************************************************************************
 *************************************************************************************************************************
