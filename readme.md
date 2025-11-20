@@ -3785,6 +3785,82 @@ export function generateMatchToken() {
   return `mt.${randomPart}`
 }
 
+export function generateSafeFilename(mimetype) {
+  const extension = mimetype.split('/')[1]
+  const random = Math.random().toString(36).substring(2, 15)
+  return `${Date.now()}_${random}.${extension}`
+}
+
+
+// Sanitize avatar path before proceeding the avatar as safe/
+export function sanitizeAvatarPath(avatar) {
+  console.log(`DEBUG: sanitizeAvatarPath called with:`, avatar)
+  if (!avatar || typeof avatar !== 'string') return '/avatar.png'
+  const base = path.basename(avatar)
+  const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+  const ext = path.extname(base).toLowerCase()
+
+  console.log(`DEBUG: File extension check - base: ${base}, ext: ${ext}`) 
+  // Check extension first
+  if (!allowedExts.includes(ext)) {
+    console.log(`DEBUG: Extension ${ext} not allowed`)
+    return '/avatar.png'
+  }
+
+  // Minimal file signature (magic number) validation
+  const filePath = path.join(__dirname, '../public/avatars', base)
+  console.log(`DEBUG: Checking file at path:`, filePath) // Debug path
+
+  try {
+    const fd = fs.openSync(filePath, 'r')
+    console.log(`DEBUG: File opened successfully, fd:`, fd)
+    const buffer = Buffer.alloc(16) // Increased buffer size
+    const bytesRead = fs.readSync(fd, buffer, 0, 16, 0)
+    fs.closeSync(fd)
+
+    console.log(`DEBUG: File ${base} - Bytes read: ${bytesRead}`)
+    console.log(`DEBUG: File ${base} - First 16 bytes:`, buffer.slice(0, 16).toString('hex'))
+
+    if (bytesRead < 16) {
+      console.log(`DEBUG: Not enough bytes read: ${bytesRead}`)
+      return '/avatar.png'
+    }
+
+    // Debug: Log the actual bytes
+    console.log(`DEBUG: File ${base} - First 16 bytes:`, buffer.slice(0, 16).toString('hex'))
+
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+      console.log(`DEBUG: File ${base} - Detected as JPEG`)
+      return `/avatars/${base}`
+    }
+    // PNG: 89 50 4E 47 0D 0A 1A 0A (need 8 bytes)
+    if (bytesRead >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
+      buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
+      console.log(`DEBUG: File ${base} - Detected as PNG`)
+      return `/avatars/${base}`
+    }
+    // GIF: "GIF87a" or "GIF89a" (need 6 bytes)
+    if (bytesRead >= 6 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38 &&
+      (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61) {
+      console.log(`DEBUG: File ${base} - Detected as GIF`)
+      return `/avatars/${base}`
+    }
+    // WebP: "RIFF" + 4 bytes + "WEBP" (need 12 bytes)
+    if (bytesRead >= 12 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+      console.log(`DEBUG: File ${base} - Detected as WebP`)
+      return `/avatars/${base}`
+    }
+
+    console.log(`DEBUG: File ${base} - No magic number match found`)
+    // If none matched, treat as invalid
+    return '/avatar.png'
+  } catch {
+    return '/avatar.png'
+  }
+}
+
 
 // The function escapes HTML special characters so that user-provided text cannot break your
 // HTML or inject code. It turns dangerous characters into safe harmless text.
@@ -3814,10 +3890,115 @@ export default const authController = {
       // before we go deep into registering this user, we can run some testx om their input data and verify if
       // they are correct using a try and catch block
     try {
+      
+      // we didnt use const here because they must be muttable, and we will be setting them during the code
+      let username, email, password;
+
+      // assign avatarFile name to a file in the directory, if user sets theirs, we reassign
+      let avatarFilename = 'avatar.png';
+
+      // firstly, we expect that this request is coming from a form that we set in the front end. And this form is 
+      // supposed to have different entry types. So we check, does this request which is coming contain a 
+      // Content-Type: multipart/form-data? If it does, then yes, this is what we are expecting. 
+      // If it dosent, then possibly we can reject it if it is a must to have the avatar, or just collect 
+      // the details and try to process it. So looks like client didnt upload image.
+
+      if (request.isMultipart && request.isMultipart()) {
+        //  ✔️ request.isMultipart Check: “Does Fastify support multipart on this route?”
+        //  ✔️ request.isMultipart() Check: “Is THIS request a multipart/form-data upload?”
+
+        //we are expecting four inputs, username, passwor, email and avatar. so we get them from the request
+
+      username = request.body?.username.value ||''
+      email = request.body?.email.value || ''
+      password = request.body?.password.value || ''
+
+      // now we will validate these inputs
+
+      if (!username || !email || !password){
+        return reply.status(400).send({
+          error: 'Missing required fields: username, email password'
+        })
+      }
+
+      //validate username format
+      if(username.length < 3 || username.length > 30 || !validateUsername(username)){
+        return reply.status(400).send({
+          error: 'Wrong username format'
+        })
+      }
+      if(!validateEmail(email)){
+        return reply.status(400).send({
+          error: 'Wrong email format'
+        })
+      }
+      if(!validatePassword(password)){
+        return reply.status(400).send({
+          error: 'Wrong password format'
+        })
+      }
+      
+      //now let us check if the user uploaded an image so we reassign it to the avatarFile
+      const avatarFile = rquest.body?.avatar?;
+      if (avatarFile && avatarFile.type === 'file' && avatarFile.fieldname === 'avatar'){
+          const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
+          //mime - Multipurpose Internet Mail Extensions
+          if (!allowedTypes.includes(avatarFile.mimetype)) {
+            return reply.status(400).send({ error: 'Invalid image file type. Allowed types are: ' + allowedTypes.join(', ') })
+          }
+
+          const uploadDir = path.join(__dirname, '../public/avatars')
+          if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true })
+
+          avatarFilename = generateSafeFilename(avatarFile.mimetype)
+          const filePath = path.join(uploadDir, avatarFilename)
 
 
+          // let us now try to safe the file
+          try {
+            // Fastify multipart can give the file in two ways: 
+            // Small files have a _buf property → you can save them directly using fs.writeFileSync()
+            // Larger files are a stream → you must pipe the file stream into a write stream using:
+              if (avatarFile._buf) {
+                fs.writeFileSync(filePath, avatarFile._buf)
+              } else {
+                await pump(avatarFile.file, fs.createWriteStream(filePath))
+              }
 
-      const {username, email, password} = request.body
+            // next we will verify if the file was successfully saved
+            const status = fs.statSync(filePath)
+
+            if (status.size === 0){
+              // if no bytes were written. remove the filepath, and inform user about bad file
+              fs.unlinkSync(filePath)
+              return reply.status(400).send({ error: 'File upload failed - empty file.' })
+              // in JavaScript, return inside an async function immediately stops the function
+            }
+
+            //but if status.size is not 0, that means the file was successfully saved, so we go ahead and sanitize the path
+            // sanitize path function as pasted above is ensuring there is no unsafe or invalid uploads. It checks whether 
+            // the filename generated for the uploaded avatar is unsafe or invalid, by checking if the sanitizer returned 
+            // its fallback safe path.
+
+            if(sanitizeAvatarPath(avatarFilename) === '/avatar.png'){
+              // it means our function detected an issue and returned the safe file we have in memory, so we unlink again
+              // and inform client of this error.
+              fs.unlinkSync(filePath)
+              return reply.status(400).send({ error: 'Invalid image file format' })
+            }
+          } catch (err) {
+            // anyways if any error got away in all our checks, we will still catch it here, and still unlink the filepath and send error status
+            console.error('Registration avatar upload error:', e)
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath)
+            }
+            return reply.status(422).send({ error: 'Avatar upload failed - file could not be processed' })
+          }
+      }  else {
+        // just collect the details and try to process it. So looks like client didnt upload image
+        ({ username, email, password } = request.body || {});
+      }
   
       //we then use bcrypt to hash the password
       const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
@@ -3878,12 +4059,9 @@ export default const authController = {
 
       console.error('Registration error:', err);
         reply.status(422).send({ error: 'Registration could not be completed. Please check your data and try again.' });
-
+      }
     }
   }
-
-
-
 }
 
 ```
@@ -4333,17 +4511,184 @@ That is EXACTLY what your code does, and it is correct.
 
 Your manual validations take care of that.
 
+*************************************************************************************************************************
+
+Here is a **clean, simple explanation** of what is happening in this line:
+
+```js
+const extension = avatarFile.mimetype.split('/')[1]
+const randomString = Math.random().toString(36).substring(2, 15)
+avatarFilename = `${Date.now()}_${randomString}.${extension}`
+```
+
+Let’s go **line-by-line**, in plain English, with examples.
+
 ---
 
-If you want, I can show you how to **fully unify JSON + multipart validation** using custom Fastify content-type parsers or how to cleanly refactor the register route.
+# 🟦 **1. Extracting the file extension**
 
+```js
+const extension = avatarFile.mimetype.split('/')[1]
+```
+
+### ✔ What `avatarFile.mimetype` looks like:
+
+* `"image/png"`
+* `"image/jpeg"`
+* `"image/webp"`
+
+### ✔ What `.split('/')` does:
+
+Split into an array:
+
+```js
+"image/png".split('/')
+→ ["image", "png"]
+```
+
+### ✔ What `[1]` does:
+
+Take the second element, i.e. the extension:
+
+```
+"png"
+"jpeg"
+"webp"
+```
+
+### 📌 Final value:
+
+```
+extension = "png"
+```
+
+---
+
+# 🟦 **2. Generating a random string**
+
+```js
+const randomString = Math.random().toString(36).substring(2, 15)
+```
+
+Let’s break it:
+
+### ✔ `Math.random()`
+
+Gives a random number between 0 and 1, e.g.:
+
+```
+0.725547823821
+```
+
+### ✔ `.toString(36)`
+
+Converts the number to **base-36** (0–9 + a–z)
+
+Example:
+
+```
+0.725547823821 → "0.q9xk2whd2pm4u"
+```
+
+Base-36 is used because it gives:
+
+* short
+* URL-safe
+* alphanumeric strings
+
+### ✔ `.substring(2, 15)`
+
+Remove the `"0."` and keep 13 characters:
+
+```
+"q9xk2whd2pm4u"
+```
+
+### 📌 Final value:
+
+```
+randomString = "q9xk2whd2pm4u"
+```
+
+---
+
+# 🟦 **3. Building a secure filename**
+
+```js
+avatarFilename = `${Date.now()}_${randomString}.${extension}`
+```
+
+### ✔ `Date.now()`
+
+Returns current timestamp in milliseconds:
+
+```
+1673451238123
+```
+
+### ✔ Combine all pieces:
+
+```
+timestamp_randomstring.extension
+```
+
+### Example output:
+
+```
+1673451238123_q9xk2whd2pm4u.png
+```
+
+---
+
+# 🟩 **Why do we build filenames like this?**
+
+### ✔ To prevent overwriting existing files
+
+User uploading `avatar.png` won't conflict with another `avatar.png`.
+
+### ✔ To avoid malicious filenames
+
+Hackers can't send filenames like:
+
+```
+../../../etc/passwd
+```
+
+We ignore user-supplied filenames entirely.
+
+### ✔ To create unique, unpredictable names
+
+Makes it hard to force filename collisions or attacks.
+
+---
+
+# ⭐ **Final Summary**
+
+### 📌 Full code:
+
+```js
+const extension = avatarFile.mimetype.split('/')[1]
+const randomString = Math.random().toString(36).substring(2, 15)
+avatarFilename = `${Date.now()}_${randomString}.${extension}`
+```
+
+### 📌 Human Explanation:
+
+1. **Get file extension from MIME type**
+   `"image/png" → "png"`
+
+2. **Generate a secure random string**
+   `"q9xk2whd2pm4u"`
+
+3. **Build a unique filename**
+   `1698987654321_q9xk2whd2pm4u.png`
+
+### 📌 Result:
+
+A safe, unique filename guaranteed not to collide with others.
 
 *************************************************************************************************************************
 
-
-Great — let me clarify this very clearly because it’s important for how **Fastify**, **HTTP**, and **multipart/form-data** work.
-
----
 
 # ⭐ **Correct Understanding**
 
@@ -4516,7 +4861,6 @@ If you want, I can show you:
 
 *************************************************************************************************************************
 
-Yes — **exactly.**
 When you use an HTML `<form>` that includes a file input, the browser **automatically** sets:
 
 ```
@@ -4620,14 +4964,6 @@ Content-Type: multipart/form-data
 ```
 
 You never manually set this in frontend code.
-
----
-
-If you want, I can show you the **correct React / JavaScript examples**:
-
-* How to submit a file from React frontend
-* How to build FormData correctly
-* What headers to set (and NOT set!)
 
 
 *************************************************************************************************************************
