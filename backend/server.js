@@ -8,6 +8,8 @@ import fastifyCookie from 'fastify-cookie'
 import fastifyStatic from 'fastify-static'
 import fastifyMultipart from 'fastify-multipart'
 import fastifyPlugin from 'fastify-plugin'
+import authRoutes from './routes/auth.js'
+
 
 
 const __filename = fileURLToPath(import.meta.url)
@@ -58,6 +60,21 @@ fastify.register(fastifyStatic, {
 //setup Database
 
 setupDb(fastify);
+
+// Register auth route
+fastify.register((authRoutes), { prefix: '/auth' })
+// if we want and other routes to be available to user withor without checking if they are logged in,
+// we just register them directly here. otherwise, if we want only registered/loggedin users to use a route
+// then we have to protect that path in a plugin that first checks if they are registered. That is where 
+// the middleware comes in.
+
+
+fastify.register(async function(privateScope) {
+  privateScope.register(fastifyPlugin(authRoutes))
+  privateScope.register(friendsRoutes, { prefix: '/api'})
+  //...
+
+})
 
 
 // Declare a route

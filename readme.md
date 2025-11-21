@@ -3881,7 +3881,8 @@ export function escapeHtml(text) {
 // &lt;script&gt;alert('hacked')&lt;/script&gt;
 // — which is safe and printed as text, not executed.
 
-export default const authController = {
+
+const authController = {
   //Register function
   async register(request, reply, db){
       reply.type('application/json')
@@ -3939,7 +3940,8 @@ export default const authController = {
       }
       
       //now let us check if the user uploaded an image so we reassign it to the avatarFile
-      const avatarFile = rquest.body?.avatar?;
+      const avatarFile = rquest.body?.avatar;
+
       if (avatarFile && avatarFile.type === 'file' && avatarFile.fieldname === 'avatar'){
           const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
@@ -4024,7 +4026,7 @@ export default const authController = {
        // then we set the cookie
        reply.setCookie('sessionId', sessionToken, {
         httpOnly: true, //prevents client-side JavaScript from reading the cookie
-        path: '/' //which URLs on your site the cookie is sent to-> is valid for the entire site
+        path: '/', //which URLs on your site the cookie is sent to-> is valid for the entire site
         signed: true, //signed with cookie secret
         secure: true, // can be sent via hhtps only
         maxAge: 365 * 24 * 60 * 60,
@@ -4039,7 +4041,8 @@ export default const authController = {
           userId: result.lastID,
           username: escapeHtml(username),
           avatar: escapeHtml(`/avatars/${avatarFilename}`)
-        });
+        })
+      }
     } catch (err){
       // then we catch error
       // There are somethings we do not want to happen during registration. e.g, we may not want someone
@@ -4060,9 +4063,90 @@ export default const authController = {
       console.error('Registration error:', err);
         reply.status(422).send({ error: 'Registration could not be completed. Please check your data and try again.' });
       }
+    },
+  
+  // now we design the login route
+  // Login function
+  async login(request, reply, db) {
+     reply.type('application/json');
+    try {
+      const { username, password } = request.body || {};
+
+      // Los datos ya están validados por Fastify schemas
+      const row = await getQuery(db,
+        `SELECT id, username, password, avatar, preferred_language, social_features_enabled FROM players WHERE username = ?`,
+        [username.trim()]
+      );
+
+      if (!row) return reply.status(401).send({ error: 'Invalid credentials' });
+
+      const passwordMatch = await bcrypt.compare(password, row.password);
+      if (!passwordMatch) return reply.status(401).send({ error: 'Invalid credentials' });
+
+      // Remove old sessions
+      await runQuery(db, "DELETE FROM sessions WHERE user_id = ?", [row.id])
+
+      // Crear nueva sesión
+      const sessionToken = generateSessionToken(row.id)
+      await runQuery(db, `INSERT INTO sessions (user_id, token) VALUES (?, ?)`, [row.id, sessionToken])
+
+      reply.setCookie('sessionId', sessionToken, {
+        httpOnly: true, //prevents client-side JavaScript from reading the cookie
+        secure: false, // can be sent via hhtps only
+        signed: true, //signed with cookie secret
+        sameSite: 'Strict', //the cookie is only sent if the request originates from the same site
+        path: '/' //which URLs on your site the cookie is sent to-> is valid for the entire site
+      });
+
+      // Set GDPR consent cookie with user's preferences from database
+      const consentData = {
+        necessary: true,
+        analytics: true,
+        social: !!row.social_features_enabled,
+        timestamp: new Date().toISOString()
+      };
+      
+      reply.setCookie('gdpr_consent', JSON.stringify(consentData), {
+        path: '/',
+        httpOnly: false, // Allow JavaScript access for frontend
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 365 * 24 * 60 * 60 // 1 year
+      });
+
+      reply.send({
+        success: true,
+        userId: row.id,
+        username: escapeHtml(row.username),
+        avatar: escapeHtml(row.avatar),
+        preferred_language: row.preferred_language || 'en'
+      });
+
+    } catch (err) {
+      if (err.message && err.message.includes('database')) {
+        console.error('Database error during login:', err);
+        return reply.status(503).send({ error: 'Login temporarily unavailable. Please try again later.' });
+      }
+      console.error('Login error:', err);
+      reply.status(422).send({ error: 'Login could not be completed. Please try again.' });
     }
+  },
+
+  // Logout function
+  async logout(request, reply, db) {
+    const rawCookie = request.cookies.sessionId
+    if (rawCookie) {
+      const { value: sessionToken } = request.unsignCookie(rawCookie)
+      await runQuery(db, "DELETE FROM sessions WHERE token = ?", [sessionToken])
+    }
+    reply.clearCookie("sessionId", { path: "/" });
+    reply.clearCookie("gdpr_consent", { path: "/" }); // Clear GDPR consent cookie on logout
+    reply.send({ success: true });
   }
 }
+
+export default authController
+
 
 ```
 
@@ -5112,7 +5196,6 @@ export const registerSchema = {
 
 ```
 
-
 ***********************************************************************************************************
 
 
@@ -5312,16 +5395,159 @@ cookie: {
 | `multipart`   | Indicate route accepts file uploads  |
 
 
-
 *************************************************************************************************************************
 
-After we have designed the login schemas in the schemas files, then we import them into our routes file ***auth.js*** and use them
+Now that we have our authSchemas and AuthContollers designed, we now import them into our Auth Routes in a file Auth.js
 
 ```js
-import { loginSchema, logoutSchema, registerSchema } from 'schemas/authSchema.js'
+import authController from '../controllers/authController.js'
+import { loginSchemaFull, logoutSchema, registerSchemaRequest } from '../schemas/authSchemas.js'
 
+export default async function authRoutes(fastify) {
+  const db = fastify.sqliteDb;
 
+  // ------------------ REGISTER ------------------
+  // Sin schema - la validación se hace en el controlador
+  fastify.post('/register', { schema: registerSchemaRequest, attachValidation: true }, async (request, reply) => {
+    await authController.register(request, reply, db)
+  });
+
+  // ------------------ LOGIN ------------------
+  fastify.post('/login', { schema: loginSchemaFull }, async (request, reply) => {
+    await authController.login(request, reply, db)
+  });
+
+  // ------------------ LOGOUT ------------------
+  fastify.post('/logout', { schema: logoutSchema }, async (request, reply) => {
+    await authController.logout(request, reply, db)
+  })
+}
 ```
+
+
+***********************************************************************************************************
+
+* Why does /register route use attachValidation: true
+
+`attachValidation: true` is used in **Fastify** when you want to:
+
+### ✅ **Run Fastify validation BUT handle the validation errors yourself in the controller**
+
+---
+
+# 🔍 **What Fastify does normally (without attachValidation)**
+
+If you write:
+
+```js
+fastify.post('/register', { schema: registerSchemaRequest }, handler)
+```
+
+Then Fastify will:
+
+* validate the body, params, query automatically
+* **reject the request BEFORE calling your controller**
+* return a built-in 400 validation error like:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": "body.username is required"
+}
+```
+
+Your route handler (`authController.register`) will **not run**.
+
+---
+
+# 🔍 **What happens when you add `attachValidation: true`**
+
+```js
+fastify.post('/register', { 
+  schema: registerSchemaRequest, 
+  attachValidation: true 
+}, async (request, reply) => {
+  await authController.register(request, reply, db)
+})
+```
+
+This changes the behavior:
+
+### ✔ Fastify STILL validates using the schema
+
+### ✔ BUT it does **NOT** automatically reject invalid input
+
+### ✔ Instead, it attaches validation errors to:
+
+```js
+request.validationError
+```
+
+⚠ Your handler **will be called even if validation failed**, giving you full control.
+
+---
+
+# 🧠 Why is this important in your case?
+
+Because **your register route handles multipart manually**, and Fastify cannot apply JSON schema validation to multipart/form-data.
+
+So your logic is:
+
+* Allow Fastify to validate **if it's JSON**
+* For multipart uploads (files), do your own validation
+* Always run the controller so you can check:
+
+  ```js
+  if (request.validationError) { ... }
+  ```
+
+This prevents Fastify from blocking multipart requests.
+
+---
+
+# ✅ When should you use `attachValidation: true`?
+
+Use it when:
+
+### 1️⃣ **You want custom error messages**
+
+Instead of Fastify’s default 400 error, you return your own:
+
+```js
+return reply.status(400).send({ error: "Invalid email format" });
+```
+
+### 2️⃣ **You want validation AND also want controller logic to run**
+
+Example: file uploads, mixed JSON + file validation.
+
+### 3️⃣ **You want more control over the order of validation + logic**
+
+---
+
+# ❌ When should you NOT use it?
+
+When the schema is simple and you want Fastify to reject invalid input automatically.
+
+Example:
+
+```js
+fastify.post('/login', { schema: loginSchemaFull }, handler)
+```
+
+This is why your **login** and **logout** routes **do not** use `attachValidation`:
+they only receive JSON, so Fastify’s automatic validation is enough.
+
+---
+
+# 👍 Summary
+
+| Route       | Why attachValidation?                                        |
+| ----------- | ------------------------------------------------------------ |
+| `/register` | Needs manual validation for multipart, custom error handling |
+| `/login`    | Pure JSON, schema works automatically                        |
+| `/logout`   | Very simple schema                                           |
 
 ***********************************************************************************************************
 
@@ -5334,13 +5560,558 @@ So we create a file called *** middleware/authPlugin.js *** and in it a file cal
 
 so what should be in this folder?
 
-In this folder is a fastify function, that received the user 
+In this folder is a fastify function, that varifies that the logged in user has a cookie in their computer that corresponds
+with that that is already in the database, that has been saved and authorizes them to visit the page they are trying to visit.
+If there is no rawcokkie, or it dosent correspond with an unsigned cookie, they will not be allowed, or even logged out as the
+case maybe, depending on the severity of the abscence of the cookie and what they want to access.
 
+```js
+import { getQuery } from '../utils/helpers.js'
+
+async function authPlugin(fastify, options) {
+  fastify.decorateRequest('userId', null);
+  const db = fastify.sqliteDb;
+
+  fastify.addHook('preHandler', async (req, reply) => {
+    const rawCookie = req.cookies.sessionId;
+    if (!rawCookie) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { value: sessionId, valid } = req.unsignCookie(rawCookie);
+    if (!valid) {
+      return reply.status(401).send({ error: 'Invalid cookie' });
+    }
+
+	console.log("DEBUG: sessionId from authPlugin:", sessionId);
+    // Buscar en la DB
+    const row = await getQuery(db, "SELECT user_id FROM sessions WHERE token = ?", [sessionId])
+    if (!row) {
+      return reply.status(401).send({ error: "Session expired or invalid" })
+    }
+
+    req.userId = row.user_id;
+  });
+}
+
+export default authPlugin;
+
+```
+
+*************************************************************************************************************************
+
+
+# ✅ **1. Does the middleware folder usually contain just one file?**
+
+**Not necessarily.**
+You can organize it however you want.
+
+But commonly:
+
+### ✔ Middleware folder (`/middleware` or `/plugins`)
+
+Often contains:
+
+* `auth.js` → authentication middleware
+* `rateLimit.js` → rate limiting middleware
+* `errorHandler.js` → global error handler
+* `cors.js` → CORS config
+* `logger.js` → logging setup
+* `upload.js` → file upload plugin
+* etc.
+
+So **it’s not limited to one file**.
+You can have as many as needed.
+
+---
+
+# ✅ **2. Why is it called a "plugin" in Fastify?**
+
+Because **Fastify's architecture is plugin-based**.
+
+A “plugin” is any function like this:
+
+```js
+async function myPlugin(fastify, options) {
+   // …
+}
+export default myPlugin;
+```
+
+Fastify calls plugins using:
+
+```js
+fastify.register(myPlugin)
+```
+
+So **your auth middleware**:
+
+```js
+async function authPlugin(fastify, options) {
+```
+
+fits the exact structure of a Fastify plugin.
+
+### Why?
+
+Because Fastify plugins:
+
+* receive `fastify` as an instance
+* can decorate the instance
+* can add hooks
+* can add routes
+* can add reply/request decorations
+* can access options passed by the register() call
+
+---
+
+# ✅ **3. Are plugins mostly decorated with Fastify?**
+
+Yes — MOST plugins use:
+
+### ✔ `fastify.decorate()`
+
+Add custom methods or values to the Fastify instance.
+
+### ✔ `fastify.decorateRequest()`
+
+Add custom values to `request`.
+
+### ✔ `fastify.decorateReply()`
+
+Add custom helpers on replies.
+
+Your plugin uses:
+
+```js
+fastify.decorateRequest('userId', null);
+```
+
+This means:
+
+* Every request has a property `req.userId`
+* Initially set to `null`
+* But your hook updates it to the logged-in user's ID
+
+This is very normal and best practice.
+
+---
+
+# 🧠 **4. Breakdown of your plugin (line by line)**
+
+### ✔ Add a new property to `request`
+
+```js
+fastify.decorateRequest('userId', null);
+```
+
+### ✔ Access the SQLite database
+
+```js
+const db = fastify.sqliteDb;
+```
+
+### ✔ Add a preHandler hook
+
+Runs **before every protected route**:
+
+```js
+fastify.addHook('preHandler', async (req, reply) => { … })
+```
+
+### ✔ Check if cookie exists
+
+```js
+const rawCookie = req.cookies.sessionId;
+```
+
+### ✔ Unsigned cookie validation
+
+```js
+const { value: sessionId, valid } = req.unsignCookie(rawCookie);
+```
+
+### ✔ Find session in database
+
+```js
+const row = await getQuery(db, "SELECT user_id FROM sessions WHERE token = ?", [sessionId]);
+```
+
+### ✔ Attach userId to request
+
+```js
+req.userId = row.user_id;
+```
+
+---
+
+# 🧩 **5. Why is this a plugin, not simple middleware?**
+
+**Because Fastify does not use Express-style middleware.**
+Fastify uses *hooks* and *plugins*.
+
+Your file does this:
+
+👉 decorates request
+👉 adds a hook
+👉 uses DB
+👉 exposes data to future routes
+
+That’s exactly what a plugin does.
+
+Middleware = logic that runs before routes
+Fastify Plugin = middleware + decorations + config + DB access + more
+
+---
+
+# 🟢 **6. How do you use this plugin?**
+
+In your main server:
+
+```js
+fastify.register(authPlugin);
+```
+
+Then, to protect routes:
+
+```js
+fastify.register(protectedRoutes, { prefix: '/api/private' });
+```
+
+Inside `protectedRoutes` you can safely access:
+
+```js
+req.userId
+```
+
+because the plugin already attached it.
+
+---
+
+# 🧠 **7. Final Answers (short & clear)**
+
+### ✔ Does middleware folder always have one file?
+
+**No. You can have many.**
+
+### ✔ Is each file usually a Fastify plugin?
+
+**Yes, this is the recommended structure.**
+
+### ✔ Are plugins often decorated with Fastify?
+
+**Yes — decorating request or reply is common and encouraged.**
+
+### ✔ Why is your auth file a plugin?
+
+**Because it decorates the request and adds hooks to Fastify — the definition of a plugin.**
 
 
 *************************************************************************************************************************
+In the server.js after desinging the middleware, 
+the `authPlugin` runs **BEFORE all protected routes** because you registered it inside the `privateScope` plugin:
+
+```js
+fastify.register(async function(privateScope) {
+  privateScope.register(fp(authPlugin));   // ← THIS activates the auth middleware
+  privateScope.register(friendsRoutes);
+  ...
+})
+```
+
+This means:
+
+* `authPlugin` runs first
+* It attaches `req.userId`
+* It protects all routes inside the same scope
+* Any request without valid cookie = automatically rejected
+* Public routes remain untouched
+
+This is exactly how Fastify "scoped plugins" work.
+
+---
+
+# 🧠 **Detailed Explanation**
+
+## ✔ 1. Fastify Plugin Scoping
+
+When you write:
+
+```js
+fastify.register(async function(privateScope) {
+```
+
+You create a **nested instance** of Fastify.
+
+Everything inside this block is isolated:
+
+* middleware only affects inside this block
+* routes only affect inside this block
+* decorators only exist inside this block
+
+So this:
+
+```js
+privateScope.register(fp(authPlugin));
+```
+
+means:
+
+👉 **All requests inside the privateScope must pass through your auth middleware**
+👉 Public routes (above) are not affected
+
+---
+
+# ✔ 2. Why `fp(authPlugin)`?
+
+You wrapped the plugin using:
+
+```js
+import fp from "fastify-plugin"
+```
+
+`fastify-plugin` ensures:
+
+* The plugin is not encapsulated (unless you want it to be)
+* The plugin loads before routes
+* The plugin can decorate Fastify
+
+Without `fp()`, the plugin would also work, but scoping may behave differently.
+Using `fp()` is the clean, recommended approach.
+
+---
+
+# ✔ 3. Your protected routes are correctly set
+
+Each protected route:
+
+```js
+privateScope.register(friendsRoutes, { prefix: '/api' });
+privateScope.register(leaderboardRoutes, { prefix: '/api' });
+...
+```
+
+Now require:
+
+* Valid cookie
+* Valid session
+* `req.userId` is injected
+
+Example:
+
+```js
+fastify.get("/friends", async (req, reply) => {
+   console.log(req.userId)   // ALWAYS available because authPlugin ran first
+})
+```
+
+---
+
+# ✔ 4. Public Routes
+
+Before the protected scope, you did:
+
+```js
+fastify.register(authRoutes, { prefix: '/api' });
+```
+
+These routes:
+
+* `/register`
+* `/login`
+
+are **public**
+They do NOT go through `authPlugin`, so users can register/login.
+
 *************************************************************************************************************************
-*************************************************************************************************************************
+
+
+# ✅ **1. Do you have to name it `privateScope`?**
+
+**No.**
+You can name the parameter **anything you want** — it’s just a variable name.
+
+This:
+
+```js
+fastify.register(async function(privateScope) {
+```
+
+Can be:
+
+```js
+fastify.register(async function(app) {
+```
+
+Or:
+
+```js
+fastify.register(async function(securedArea) {
+```
+
+Or:
+
+```js
+fastify.register(async function(banana) {
+```
+
+As long as you call:
+
+```js
+banana.register(fp(authPlugin))
+```
+
+it will work the same.
+
+### ✔ Why?
+
+Because when you do:
+
+```js
+fastify.register(async function(instance) {
+```
+
+Fastify automatically creates a **child Fastify instance**, and you are simply giving it any variable name.
+
+---
+
+# ✅ **2. Can you call `fp` any name?**
+
+Yes.
+This is valid:
+
+```js
+import fp from 'fastify-plugin'
+```
+
+This is also valid:
+
+```js
+import fastifyPlugin from 'fastify-plugin'
+```
+
+Then you would call:
+
+```js
+privateScope.register(fastifyPlugin(authPlugin));
+```
+
+or:
+
+```js
+privateScope.register(fp(authPlugin));
+```
+
+The name is up to you — **the behavior is identical**.
+
+---
+
+# 🔥 **3. What exactly is *encapsulation* in Fastify?**
+
+Encapsulation is the MOST IMPORTANT concept in Fastify architecture.
+
+Let me explain it in the simplest way:
+
+---
+
+## 🧠 **Encapsulation = Each `fastify.register()` call creates an isolated world.**
+
+### Meaning:
+
+Inside this:
+
+```js
+fastify.register(async function(scope) {
+```
+
+You get a **separate Fastify instance**, called **scope**.
+
+Inside it:
+
+* hooks only apply **inside this scope**
+* plugins only apply **inside this scope**
+* decorators are only available **inside this scope**
+* routes inside this scope are protected
+* routes outside are unaffected
+
+---
+
+# 🎯 **Example of encapsulation in your app**
+
+### PUBLIC SCOPE (no middleware)
+
+```js
+fastify.register(authRoutes, { prefix: '/api' });
+```
+
+✔ Users can register
+✔ Users can log in
+✔ No need for authentication
+✔ `req.userId` does NOT exist here
+
+---
+
+### PROTECTED SCOPE (with middleware)
+
+```js
+fastify.register(async function(privateScope){
+  privateScope.register(fp(authPlugin));
+  privateScope.register(friendsRoutes, { prefix: '/api' });
+  privateScope.register(playersRoutes, { prefix: '/api' });
+  ...
+})
+```
+
+Inside this scope:
+
+* `authPlugin` runs FIRST
+* `req.userId` is available
+* cookies must be valid
+* all routes here require login
+* public routes are unaffected
+
+This is encapsulation.
+
+---
+
+# 🧱 **Fastify Encapsulation = Layered Architecture**
+
+Think of it like this:
+
+```
+fastify root instance
+ ├── public scope (no auth)
+ └── private scope (auth required)
+        ├── friends routes
+        ├── leaderboard routes
+        ├── tetris routes
+        └── profile routes
+```
+
+Each "scope" is its own environment.
+
+---
+
+# 🧠 **Why is encapsulation important?**
+
+### ✔ It lets you protect only certain routes
+
+No need to manually add authorization to every route.
+
+### ✔ It prevents decorators from leaking to public routes
+
+`req.userId` exists only in private routes.
+
+### ✔ You can load plugins only where needed
+
+Your auth plugin does **not affect public routes**.
+
+### ✔ Makes large applications clean and maintainable
+
+This structure is exactly what large-scale production apps use.
+
+
+
 *************************************************************************************************************************
 *************************************************************************************************************************
 *************************************************************************************************************************
